@@ -6,7 +6,7 @@
 
 You are running as a scheduled Claude Code routine on Anthropic's cloud infrastructure. You cannot ask Tom anything during this run. Your job is to check whether today is an office day, synthesize real-time traffic data from MDOT Mi Drive and Google Maps Routes API, classify today as NORMAL or ACTIONABLE, and send Tom a commute briefing tailored to that classification.
 
-**Every office day gets a briefing.** v4 flipped the silent-on-ALL_CLEAR invariant from v3. The routine is now a daily information channel, not an exception-alerting channel. A normal morning gets a short, calm mobile push with today's numbers and a leave-by recommendation. An unusual morning gets an escalated ⚠️ push plus a persistent notification with the full context. Only gated-off (non-office) days are silent.
+**Every office day gets a briefing.** v4 flipped the silent-on-ALL_CLEAR invariant from v3. The routine is now a daily information channel, not an exception-alerting channel. A normal morning gets a short, calm notification with today's numbers and a leave-by recommendation. An unusual morning gets an escalated ⚠️ notification with the full context. Only gated-off (non-office) days are silent.
 
 **False-alarm suppression still matters, but it operates at the escalation boundary now.** Instead of "should I notify at all?" the question is "should this be a calm NORMAL briefing or an escalated ACTIONABLE warning?" Gratuitous escalation is the failure mode that destroys trust: if you dress up an ordinary slow-traffic day as a ⚠️ crisis, Tom starts ignoring the ⚠️ signal within a week, and the system's core value collapses. Conservative bias: when uncertain between NORMAL and ACTIONABLE, send NORMAL with the data on display and let Tom decide.
 
@@ -255,37 +255,32 @@ Emit the token `NORMAL` or `ACTIONABLE` as the decision. Proceed to **Step 5**.
 
 ## Step 5 — Compose and send the notification
 
-### If NORMAL: compose a daily briefing push
+### If NORMAL: compose a daily briefing notification
 
-Goal: short, calm, declarative. Give Tom today's numbers and a leave-by time he can act on. Under ~160 characters (HA pushes wrap longer messages but shorter is better). Include:
+Goal: short, calm, declarative. Give Tom today's numbers and a leave-by time he can act on. The first sentence of the `<routine_summary>` becomes Tom's phone banner, so front-load the actionable data there.
 
-- Leave-by time (`leave_by` formatted HH:MM)
-- Expected arrival time (`expected_arrival` formatted HH:MM)
-- Route indication (typically "via I-75")
-- Where today falls in the band, expressed as `today_min` vs `low_min`–`high_min`
-- A short zero-fluff incident note if anything minor was seen but not escalated (e.g., shoulder crash, persistent construction)
+Compose a `<routine_summary>` block where:
 
-Examples (illustrative only — the specific band and duration values vary day to day, don't anchor on the numbers shown here):
-- `Leave by 8:19 for 8:57 ETA via I-75. Today 38 min, band 36–48 typical. Clear corridor.`
-- `Leave by 8:11 for 8:58 ETA via I-75. Today 49 min, high end of 37–50 band. Minor shoulder incident at 12 Mile, no lanes blocked.`
-- `Leave by 8:16 for 8:56 ETA via I-75. Today 44 min, mid-band (39–53). Persistent Rosa Parks lane closure still posted.`
-- `Leave by 8:14 for 8:53 ETA via I-75. Today 41 min, near low end of 38–52 band. Rain in forecast but not impacting travel yet.`
+- **First sentence** — the short briefing: leave-by time, ETA, route, today's duration vs the band, and a one-phrase corridor note. This is what Tom sees on his lock screen.
+- **After the first sentence** — a few lines of supporting detail he can read in the email: any minor incidents noted but not escalated, persistent construction status, data source summary.
 
-**No persistent notification on NORMAL runs** — the HA dashboard stays clean and reserved for escalations.
+Examples of the first sentence (illustrative — numbers vary daily):
+- `Leave by 8:19 for 8:57 ETA via I-75 — today 38 min, band 36–48, clear corridor.`
+- `Leave by 8:11 for 8:58 ETA via I-75 — today 49 min, high end of 37–50 band, shoulder incident at 12 Mile (no lanes blocked).`
+- `Leave by 8:16 for 8:56 ETA via I-75 — today 44 min, mid-band (39–53), persistent Rosa Parks lane closure still posted.`
 
-### If ACTIONABLE: compose both the escalation push and the persistent notification
+### If ACTIONABLE: compose an escalated notification with full briefing
 
-**Short push** — one line, under ~160 chars, **must lead with `⚠️`** to visually distinguish from normal briefings. Include the specific cause, the quantitative framing, and a concrete action.
+The `<routine_summary>` does double duty: the first sentence is the ⚠️ phone banner, and the full body is the email Tom reads for detail and action. One notification replaces what was previously a mobile push + a persistent HA notification.
 
-Examples (illustrative only — specific numbers will vary):
-- `⚠️ Crash on I-75 at 12 Mile blocks 2 lanes. Today 63 min vs 37–50 band. Take M-10: leave 8:00 for 8:54. Saves 9 min.`
-- `⚠️ I-696 WB→SB I-75 ramp closed plus crash at Clay. Today 58 min, outside 36–49 band. Take M-10: leave 8:05 for 8:58. Or WFH.`
-- `⚠️ DMS at Crooks reads FLOODING AFTER 9 MILE. Today 67 min vs 39–52 band. Consider WFH or delay 45+ min.`
-- `⚠️ Fresh crash at Rochester Rd reported 7:33 AM — Google hasn't priced it in yet (today 43 min, band 38–51). Leave by 8:00 to be safe.`
+Compose a `<routine_summary>` block where:
 
-**Full briefing** (markdown, for the persistent notification):
+- **First sentence** — must lead with `⚠️`. Include the specific cause, the quantitative framing, and a concrete action. This is the lock-screen alert.
+- **After the first sentence** — the full briefing in markdown:
 
 ```
+⚠️ {one-line alert with cause, numbers, and action}
+
 # I-75 SB Commute Watch — {date}
 
 **{one-line headline with the specific action}**
@@ -310,45 +305,35 @@ Examples (illustrative only — specific numbers will vary):
 - Data timestamp: {iso timestamp, America/Detroit}
 ```
 
-### Send the mobile push (all non-gated runs — NORMAL and ACTIONABLE)
+Examples of the first sentence (illustrative — numbers vary daily):
+- `⚠️ Crash on I-75 at 12 Mile blocks 2 lanes — today 63 min vs 37–50 band, take M-10: leave 8:00 for 8:54 (saves 9 min).`
+- `⚠️ I-696 WB→SB I-75 ramp closed plus crash at Clay — today 58 min, outside 36–49 band, take M-10: leave 8:05 for 8:58, or WFH.`
+- `⚠️ DMS at Crooks reads FLOODING AFTER 9 MILE — today 67 min vs 39–52 band, consider WFH or delay 45+ min.`
+- `⚠️ Fresh crash at Rochester Rd reported 7:33 AM — Google hasn't priced it in yet (today 43 min, band 38–51), leave by 8:00 to be safe.`
 
-```bash
-SERVICE_PATH=$(echo "$HA_NOTIFY_SERVICE" | tr '.' '/')
-curl -fsS -X POST \
-  -H "Authorization: Bearer $HA_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "$(jq -n --arg msg "$SHORT_PUSH" --arg url "$SESSION_URL" '{title: "Commute Watch", message: $msg, data: {group: "commute-watch", url: $url, tag: "commute-watch"}}')" \
-  "$HA_URL/api/services/$SERVICE_PATH"
-```
+### Send the notification (all non-gated runs — NORMAL and ACTIONABLE)
 
-The `url` deep-links the push to this Claude Code session. `tag: "commute-watch"` makes subsequent pushes replace the previous one on Tom's phone — on any given day, only the latest run's push remains visible.
+Use the **PushNotification** tool with `status: "proactive"`. Place the composed text inside `<routine_summary>` tags in the `message` parameter. The Anthropic notification system delivers it as:
 
-### Send the persistent notification (ACTIONABLE only)
+- **Phone push** — first sentence of the `<routine_summary>` becomes the banner notification on Tom's phone
+- **Email** — the full `<routine_summary>` content is delivered to Tom's inbox
 
-```bash
-DATE=$(TZ=America/Detroit date +%Y-%m-%d)
-curl -fsS -X POST \
-  -H "Authorization: Bearer $HA_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "$(jq -n --arg title "Commute Watch — $DATE" --arg message "$FULL_BRIEFING_MARKDOWN" --arg id "commute-watch-$DATE" '{title: $title, message: $message, notification_id: $id}')" \
-  "$HA_URL/api/services/persistent_notification/create"
-```
+This single tool call replaces both the mobile push and the persistent notification. One delivery mechanism, two surfaces (phone + email), zero external dependencies.
 
-The `notification_id` is keyed by date so re-runs on the same day replace the earlier briefing. **Skip this entirely on NORMAL runs** — reserved for escalations.
+**NORMAL runs**: the notification is a short summary — phone banner has the numbers, email has the supporting detail.
+
+**ACTIONABLE runs**: the notification is the full briefing — phone banner has the ⚠️ alert, email has the complete analysis Tom needs to act on without opening the session.
 
 ## Step 6 — Exit
 
-- **NORMAL**: after the mobile push is sent, exit. No persistent notification, no commits, no state.
-- **ACTIONABLE**: after both notifications are sent, exit. No commits, no state.
+- **NORMAL**: after the PushNotification is sent, exit. No commits, no state.
+- **ACTIONABLE**: after the PushNotification is sent, exit. No commits, no state.
 - **Gated off** (no `$CALENDAR_KEYWORD` event): silent exit with zero side effects.
 
 ## Abort conditions
 
-Abort (send a short failure push via the mobile channel, skip the persistent notification, exit) if:
+Abort (send a short failure notification via PushNotification, exit) if:
 
-- `HA_URL` is unset or points to an internal/non-routable URL
-- `HA_TOKEN` is unset
-- `HA_NOTIFY_SERVICE` is unset
 - `GOOGLE_MAPS_API_KEY` is unset
 - Required repo files are missing (`CLAUDE.md`, `docs/mdot-api-reference.md`, `docs/google-routes-api-reference.md`, `routines/commute-watch.md`)
 - The Google Calendar MCP is unavailable or errors during Step 2 — fail closed, do not assume an office day
@@ -360,10 +345,10 @@ Do **not** abort on:
 - One or two of the three Google Routes calls failing (degrade per Step 3d)
 - Google Routes returning fewer alternative routes than expected
 
-Failure push format:
+Failure notification format (inside `<routine_summary>` tags):
 
 ```
-Commute Watch: routine failed. Reason: {one short sentence}. See session log.
+Commute Watch failed: {one short sentence}. See session log for details.
 ```
 
 ## Success criteria
@@ -373,8 +358,8 @@ A successful run:
 - Checked the calendar and either gated off (silent) or proceeded
 - Fetched MDOT data and Google Routes data (tolerating partial failures per Step 3d)
 - Classified the day as NORMAL or ACTIONABLE with a conservative bias toward NORMAL
-- Sent exactly one mobile push on NORMAL runs
-- Sent exactly two notifications (mobile push + persistent notification) on ACTIONABLE runs
+- Sent exactly one PushNotification on NORMAL runs (short briefing)
+- Sent exactly one PushNotification on ACTIONABLE runs (⚠️ alert + full briefing in body)
 - Sent zero notifications on gated-off runs
 - Left a clean working tree (v4 is fully stateless)
 
